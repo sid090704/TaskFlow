@@ -3,9 +3,9 @@ from sqlalchemy.orm import Session
 
 from app.dependencies.database import get_db
 from app.models.user import User
-from app.schemas.auth import RegisterRequest, UserResponse
-from app.core.security import hash_password
 
+from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserResponse
+from app.core.security import create_access_token, hash_password, verify_password
 
 router = APIRouter()
 
@@ -43,3 +43,40 @@ def register_user(
     db.refresh(user)
 
     return user
+
+ 
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+)
+def login_user(
+    login_data: LoginRequest,
+    db: Session = Depends(get_db),
+):
+    user = (
+        db.query(User)
+        .filter(User.email == login_data.email)
+        .first()
+    )
+
+    if not user or not verify_password(
+        login_data.password,
+        user.password_hash,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive",
+        )
+
+    access_token = create_access_token(user.id)
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+    }
