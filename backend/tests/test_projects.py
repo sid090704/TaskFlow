@@ -86,3 +86,43 @@ def test_project_name_must_have_at_least_three_characters(client):
     )
 
     assert response.status_code == 422
+
+
+
+def test_user_can_list_their_projects(client):
+    token = register_and_login(client)
+
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Create the first project
+    client.post(
+        "/api/v1/projects/",
+        headers=headers,
+        json={"name": "Project Alpha"},
+    )
+
+    # Create the second project
+    client.post(
+        "/api/v1/projects/",
+        headers=headers,
+        json={"name": "Project Beta"},
+    )
+
+    response = client.get(
+        "/api/v1/projects/",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+
+    project_names = [project["name"] for project in response.json()]
+
+    assert "Project Alpha" in project_names
+    assert "Project Beta" in project_names
+
+
+def test_user_cannot_list_projects_without_authentication(client):
+    response = client.get("/api/v1/projects/")
+
+    assert response.status_code in (401, 403)

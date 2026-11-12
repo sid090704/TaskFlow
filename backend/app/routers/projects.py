@@ -52,3 +52,23 @@ def create_project(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not create project",
         )
+        
+
+
+@router.get("/", response_model=list[ProjectResponse])
+def get_my_projects(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    projects = (
+        db.query(Project)
+        .join(
+            ProjectMember,
+            Project.id == ProjectMember.project_id,
+        )
+        .filter(ProjectMember.user_id == current_user.id)
+        .order_by(Project.created_at.desc())
+        .all()
+    )
+
+    return projects
