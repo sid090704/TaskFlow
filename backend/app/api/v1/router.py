@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.routers import health,auth,users
+from app.routers import health,auth,users,projects
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -20,4 +20,10 @@ api_router.include_router(
     users.router,
     prefix="/users",
     tags=["Users"],
+)
+
+api_router.include_router(
+    projects.router,
+    prefix="/projects",
+    tags=["Projects"],
 )
