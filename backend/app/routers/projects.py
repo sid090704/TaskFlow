@@ -8,6 +8,10 @@ from app.models.project import Project
 from app.models.project_member import ProjectMember, ProjectRole
 from app.models.user import User
 from app.schemas.projects import ProjectCreate, ProjectResponse
+from app.dependencies.projects import get_project_membership
+from app.dependencies.projects import require_project_roles
+from app.schemas.projects import ProjectUpdate
+
 
 
 router = APIRouter()
@@ -72,3 +76,72 @@ def get_my_projects(
     )
 
     return projects
+
+
+@router.get("/{project_id}", response_model=ProjectResponse)
+def get_project_details(
+    project_id: int,
+    db: Session = Depends(get_db),
+    membership: ProjectMember = Depends(get_project_membership),
+):
+    project = db.query(Project).filter(Project.id == project_id).first()
+
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+
+    return project
+
+
+
+@router.patch("/{project_id}", response_model=ProjectResponse)
+def update_project(
+    project_id: int,
+    project_data: ProjectUpdate,
+    db: Session = Depends(get_db),
+    membership: ProjectMember = Depends(
+        require_project_roles(ProjectRole.OWNER, ProjectRole.MANAGER)
+    ),
+):
+    project = db.query(Project).filter(Project.id == project_id).first()
+
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+
+    update_data = project_data.model_dump(exclude_unset=True)
+
+    for field, value in update_data.items():
+        setattr(project, field, value)
+
+    db.commit()
+    db.refresh(project)
+
+    return project
+
+
+
+@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    membership: ProjectMember = Depends(
+        require_project_roles(ProjectRole.OWNER)
+    ),
+):
+    project = db.query(Project).filter(Project.id == project_id).first()
+
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+
+    db.delete(project)
+    db.commit()
+
+    return None

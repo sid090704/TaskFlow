@@ -7,9 +7,13 @@ from sqlalchemy import (
     ForeignKey,
     UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.project import Project
 
 
 class ProjectRole(str, Enum):
@@ -58,3 +62,7 @@ class ProjectMember(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+    
+    project: Mapped["Project"] = relationship(
+    back_populates="memberships"
+)

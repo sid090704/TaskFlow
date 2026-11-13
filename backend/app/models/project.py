@@ -1,10 +1,13 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, ForeignKey, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from app.models.project_member import ProjectMember
 
 class Project(Base):
     __tablename__ = "projects"
@@ -39,3 +42,8 @@ class Project(Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+    
+    memberships: Mapped[list["ProjectMember"]] = relationship(
+    back_populates="project",
+    cascade="all, delete-orphan",
+)
