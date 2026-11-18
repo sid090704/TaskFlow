@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.models.project import Project
+    from app.models.comment import Comment
 
 
 class TaskStatus(str, Enum):
@@ -102,4 +103,9 @@ class Task(Base):
     
     project: Mapped["Project"] = relationship(
     back_populates="tasks"
-)
+    )
+    
+    comments: Mapped[list["Comment"]] = relationship(
+    back_populates="task",
+    cascade="all, delete-orphan",
+   )
