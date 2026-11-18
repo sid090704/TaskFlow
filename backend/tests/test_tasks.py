@@ -192,3 +192,58 @@ def test_user_cannot_access_another_projects_task(client):
     )
 
     assert response.status_code == 404
+
+
+def test_owner_can_delete_task(client):
+    token = register_and_login(client, "taskdeleteowner@example.com")
+    project_id = create_project(client, token)
+    task = create_task(client, token, project_id)
+
+    headers = {"Authorization": f"Bearer {token}"}
+
+    response = client.delete(
+        f"/api/v1/projects/{project_id}/tasks/{task['id']}",
+        headers=headers,
+    )
+
+    assert response.status_code == 204
+
+    get_response = client.get(
+        f"/api/v1/projects/{project_id}/tasks/{task['id']}",
+        headers=headers,
+    )
+
+    assert get_response.status_code == 404
+
+
+def test_member_cannot_delete_task(client, db_session):
+    owner_token = register_and_login(
+        client, "taskdeletememberowner@example.com"
+    )
+    member_token = register_and_login(
+        client, "taskdeletemember@example.com"
+    )
+
+    project_id = create_project(client, owner_token)
+    task = create_task(client, owner_token, project_id)
+
+    member_id = client.get(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {member_token}"},
+    ).json()["id"]
+
+    db_session.add(
+        ProjectMember(
+            project_id=project_id,
+            user_id=member_id,
+            role=ProjectRole.MEMBER,
+        )
+    )
+    db_session.commit()
+
+    response = client.delete(
+        f"/api/v1/projects/{project_id}/tasks/{task['id']}",
+        headers={"Authorization": f"Bearer {member_token}"},
+    )
+
+    assert response.status_code == 403

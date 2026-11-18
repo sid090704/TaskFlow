@@ -5,10 +5,10 @@ from datetime import datetime, timezone
 
 from app.dependencies.auth import get_current_user
 from app.dependencies.database import get_db
-from app.dependencies.projects import get_project_membership
+from app.dependencies.projects import get_project_membership,require_project_roles
 from app.dependencies.tasks import get_project_task
 
-from app.models.project_member import ProjectMember
+from app.models.project_member import ProjectMember,ProjectRole
 from app.models.task import Task,TaskPriority, TaskStatus
 from app.models.user import User
 
@@ -153,3 +153,19 @@ def update_task(
 
     return task
 
+
+@router.delete(
+    "/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_task(
+    task: Task = Depends(get_project_task),
+    db: Session = Depends(get_db),
+    membership: ProjectMember = Depends(
+        require_project_roles(ProjectRole.OWNER, ProjectRole.MANAGER)
+    ),
+):
+    db.delete(task)
+    db.commit()
+
+    return None
