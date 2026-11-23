@@ -4,11 +4,13 @@ from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.models.project_member import ProjectMember
     from app.models.task import Task
+    from app.models.label import Label
 
 class Project(Base):
     __tablename__ = "projects"
@@ -50,6 +52,11 @@ class Project(Base):
     )
     
     tasks: Mapped[list["Task"]] = relationship(
+    back_populates="project",
+    cascade="all, delete-orphan",
+   )
+    
+    labels: Mapped[list["Label"]] = relationship(
     back_populates="project",
     cascade="all, delete-orphan",
    )

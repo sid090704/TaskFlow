@@ -14,9 +14,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 from typing import TYPE_CHECKING
 
+from app.models.label import task_labels
+
 if TYPE_CHECKING:
     from app.models.project import Project
     from app.models.comment import Comment
+    from app.models.label import Label
 
 
 class TaskStatus(str, Enum):
@@ -108,4 +111,9 @@ class Task(Base):
     comments: Mapped[list["Comment"]] = relationship(
     back_populates="task",
     cascade="all, delete-orphan",
+   )
+    
+    labels: Mapped[list["Label"]] = relationship(
+    secondary=task_labels,
+    back_populates="tasks",
    )
