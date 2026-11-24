@@ -7,7 +7,7 @@ from app.core.config import TEST_DATABASE_URL
 from app.db.base import Base
 from app.dependencies.database import get_db
 from app.main import app
-from app.models import User, Project, ProjectMember,Task,Comment,Label  # noqa: F401
+from app.models import User, Project, ProjectMember,Task,Comment,Label,Attachment  # noqa: F401
 
 
 test_engine = create_engine(TEST_DATABASE_URL)

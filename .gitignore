@@ -19,3 +19,6 @@ Thumbs.db
 # Node
 node_modules/
 dist/
+
+# Uploaded files
+backend/uploads/
