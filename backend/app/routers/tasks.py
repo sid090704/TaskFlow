@@ -14,6 +14,8 @@ from app.models.user import User
 
 from app.schemas.tasks import TaskCreate, TaskResponse, TaskUpdate
 
+from app.services.activity_service import create_activity_log
+from app.services.notification_service import create_notification
 
 router = APIRouter()
 
@@ -58,10 +60,38 @@ def create_task(
     )
 
     db.add(task)
+    db.flush()
+    
+    create_activity_log(
+        db=db,
+        project_id=project_id,
+        user_id=current_user.id,
+        task_id=task.id,
+        action="TASK_CREATED",
+        description=f'Created task "{task.title}"',
+        details={
+            "title": task.title,
+            "priority": task.priority.value,
+            "assignee_id": task.assignee_id,
+        },
+    )
+    # Notify the assignee, but don't notify the creator
+    # if they assigned the task to themselves.
+    if task.assignee_id is not None and task.assignee_id != current_user.id:
+        create_notification(
+            db=db,
+            user_id=task.assignee_id,
+            actor_id=current_user.id,
+            project_id=project_id,
+            task_id=task.id,
+            notification_type="TASK_ASSIGNED",
+            message=f'You have been assigned a task: {task.title}',
+        )
     db.commit()
     db.refresh(task)
+    return task  
 
-    return task
+ 
 
 
 @router.get("/", response_model=list[TaskResponse])
