@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.routers import health,auth,users,projects,tasks,comments,labels,attachments
+from app.routers import health,auth,users,projects,tasks,comments,labels,attachments,notifications,activity_logs
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -47,3 +47,7 @@ api_router.include_router(
 )
 
 api_router.include_router(attachments.router)
+
+api_router.include_router( notifications.router )
+
+api_router.include_router(activity_logs.router)

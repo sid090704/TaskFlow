@@ -5,3 +5,5 @@ from app.models.task import Task, TaskStatus, TaskPriority
 from app.models.comment import Comment
 from app.models.label import Label
 from app.models.attachment import Attachment
+from app.models.notification import Notification
+from app.models.activity_log import ActivityLog
