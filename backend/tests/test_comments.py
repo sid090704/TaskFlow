@@ -1,3 +1,6 @@
+from app.models.activity_log import ActivityLog
+from app.models.notification import Notification
+
 
 def register_and_login(client, email):
     response = client.post(
@@ -151,3 +154,120 @@ def test_user_cannot_edit_another_users_comment(client, db_session):
     )
 
     assert response.status_code == 403
+
+def test_comment_creation_creates_activity_log(client, db_session):
+    token = register_and_login(
+        client, "commentactivity@example.com"
+    )
+    project_id = create_project(client, token)
+    task_id = create_task(client, token, project_id)
+
+    comment = create_comment(
+        client, token, project_id, task_id
+    )
+
+    activity = (
+        db_session.query(ActivityLog)
+        .filter(
+            ActivityLog.project_id == project_id,
+            ActivityLog.task_id == task_id,
+            ActivityLog.action == "COMMENT_CREATED",
+        )
+        .first()
+    )
+
+    assert activity is not None
+    assert activity.details["comment_id"] == comment["id"]
+    
+def test_comment_creation_notifies_task_creator(
+    client, db_session
+):
+    owner_token = register_and_login(
+        client, "commentnotifyowner@example.com"
+    )
+    member_token = register_and_login(
+        client, "commentnotifymember@example.com"
+    )
+
+    project_id = create_project(client, owner_token)
+    task_id = create_task(client, owner_token, project_id)
+
+    # Get the member's database ID.
+    member_id = client.get(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {member_token}"},
+    ).json()["id"]
+
+    # Add the member to the project.
+    from app.models.project_member import ProjectMember, ProjectRole
+
+    db_session.add(
+        ProjectMember(
+            project_id=project_id,
+            user_id=member_id,
+            role=ProjectRole.MEMBER,
+        )
+    )
+    db_session.commit()
+
+    # The member writes a comment on the owner's task.
+    response = client.post(
+        f"/api/v1/projects/{project_id}/tasks/{task_id}/comments/",
+        headers={"Authorization": f"Bearer {member_token}"},
+        json={"content": "Here is my update"},
+    )
+
+    assert response.status_code == 201
+
+    # The task creator should receive a notification.
+    owner_id = client.get(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+
+    notification = (
+        db_session.query(Notification)
+        .filter(
+            Notification.user_id == owner_id,
+            Notification.task_id == task_id,
+            Notification.notification_type == "COMMENT_CREATED",
+        )
+        .first()
+    )
+
+    assert notification is not None
+    assert notification.actor_id == member_id
+
+def test_comment_author_does_not_receive_own_notification(
+    client, db_session
+):
+    token = register_and_login(
+        client, "commentselfnotify@example.com"
+    )
+    project_id = create_project(client, token)
+    task_id = create_task(client, token, project_id)
+
+    user_id = client.get(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()["id"]
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/tasks/{task_id}/comments/",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"content": "My own comment"},
+    )
+
+    assert response.status_code == 201
+
+    notification_count = (
+        db_session.query(Notification)
+        .filter(
+            Notification.user_id == user_id,
+            Notification.task_id == task_id,
+            Notification.notification_type == "COMMENT_CREATED",
+        )
+        .count()
+    )
+
+    assert notification_count == 0

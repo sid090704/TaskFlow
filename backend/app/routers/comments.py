@@ -16,6 +16,8 @@ from app.schemas.comments import (
     CommentUpdate,
 )
 
+from app.services.activity_service import create_activity_log
+from app.services.notification_service import create_notification
 
 router = APIRouter()
 
@@ -33,6 +35,7 @@ def create_comment(
     current_user: User = Depends(get_current_user),
     task: Task = Depends(get_project_task),
 ):
+    # Create the comment.
     comment = Comment(
         task_id=task.id,
         user_id=current_user.id,
@@ -40,6 +43,46 @@ def create_comment(
     )
 
     db.add(comment)
+
+    # Generate the comment ID before committing.
+    db.flush()
+
+    # Record the comment creation in the project activity log.
+    create_activity_log(
+        db=db,
+        project_id=project_id,
+        user_id=current_user.id,
+        task_id=task.id,
+        action="COMMENT_CREATED",
+        description=f'Added a comment to task "{task.title}"',
+        details={
+            "comment_id": comment.id,
+        },
+    )
+
+    # Identify the task participants who should receive notifications.
+    recipients = {
+        task.creator_id,
+        task.assignee_id,
+    }
+
+    # Remove empty values and the person who wrote the comment.
+    recipients.discard(None)
+    recipients.discard(current_user.id)
+
+    # Notify the remaining participants.
+    for recipient_id in recipients:
+        create_notification(
+            db=db,
+            user_id=recipient_id,
+            actor_id=current_user.id,
+            project_id=project_id,
+            task_id=task.id,
+            notification_type="COMMENT_CREATED",
+            message=f'New comment on task "{task.title}"',
+        )
+
+    # Save the comment, activity log and notifications together.
     db.commit()
     db.refresh(comment)
 
