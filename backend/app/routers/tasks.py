@@ -134,12 +134,14 @@ def get_task_details(
 
 
 
+
 @router.patch("/{task_id}", response_model=TaskResponse)
 def update_task(
     project_id: int,
     task_data: TaskUpdate,
     task: Task = Depends(get_project_task),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     update_data = task_data.model_dump(exclude_unset=True)
 
@@ -163,20 +165,169 @@ def update_task(
                     detail="Assignee must be a member of this project",
                 )
 
-    # Handle task completion timestamps.
-    if "status" in update_data:
-        new_status = update_data["status"]
+    # Capture the original values before modifying the task.
+    old_status = task.status
+    old_priority = task.priority
+    old_assignee_id = task.assignee_id
+
+    # Identify fields whose values actually change.
+    changed_fields = {
+        field: value
+        for field, value in update_data.items()
+        if getattr(task, field) != value
+    }
+
+    # Update completion timestamp only when status actually changes.
+    if "status" in changed_fields:
+        new_status = changed_fields["status"]
 
         if new_status == TaskStatus.DONE:
-            if task.status != TaskStatus.DONE:
-                task.completed_at = datetime.now(timezone.utc)
-
+            task.completed_at = datetime.now(timezone.utc)
         else:
             task.completed_at = None
 
-    # Apply the requested changes.
-    for field, value in update_data.items():
+    # Apply the actual changes.
+    for field, value in changed_fields.items():
         setattr(task, field, value)
+
+    # Record status change.
+    if "status" in changed_fields:
+        create_activity_log(
+            db=db,
+            project_id=project_id,
+            user_id=current_user.id,
+            task_id=task.id,
+            action="TASK_STATUS_CHANGED",
+            description=(
+                f"Changed task status from "
+                f"{old_status.value} to {task.status.value}"
+            ),
+            details={
+                "old_status": old_status.value,
+                "new_status": task.status.value,
+            },
+        )
+
+    # Record priority change.
+    if "priority" in changed_fields:
+        create_activity_log(
+            db=db,
+            project_id=project_id,
+            user_id=current_user.id,
+            task_id=task.id,
+            action="TASK_PRIORITY_CHANGED",
+            description=(
+                f"Changed task priority from "
+                f"{old_priority.value} to {task.priority.value}"
+            ),
+            details={
+                "old_priority": old_priority.value,
+                "new_priority": task.priority.value,
+            },
+        )
+
+    # Record reassignment.
+    if "assignee_id" in changed_fields:
+        create_activity_log(
+            db=db,
+            project_id=project_id,
+            user_id=current_user.id,
+            task_id=task.id,
+            action="TASK_ASSIGNED",
+            description=(
+                f"Changed task assignee from "
+                f"{old_assignee_id} to {task.assignee_id}"
+            ),
+            details={
+                "old_assignee_id": old_assignee_id,
+                "new_assignee_id": task.assignee_id,
+            },
+        )
+
+        # Notify the new assignee, unless they performed the update.
+        if (
+            task.assignee_id is not None
+            and task.assignee_id != current_user.id
+        ):
+            create_notification(
+                db=db,
+                user_id=task.assignee_id,
+                actor_id=current_user.id,
+                project_id=project_id,
+                task_id=task.id,
+                notification_type="TASK_ASSIGNED",
+                message=f"You have been assigned a task: {task.title}",
+            )
+
+    # Record other changes, such as title, description or due date.
+    other_changed_fields = (
+        set(changed_fields.keys())
+        - {"status", "priority", "assignee_id"}
+    )
+
+    if other_changed_fields:
+        create_activity_log(
+            db=db,
+            project_id=project_id,
+            user_id=current_user.id,
+            task_id=task.id,
+            action="TASK_UPDATED",
+            description=(
+                "Updated task fields: "
+                + ", ".join(sorted(other_changed_fields))
+            ),
+            details={
+                "changed_fields": sorted(other_changed_fields),
+            },
+        )
+
+    # Notify relevant task participants about status changes.
+    if "status" in changed_fields:
+        recipients = {
+            task.creator_id,
+            task.assignee_id,
+        }
+
+        recipients.discard(None)
+        recipients.discard(current_user.id)
+
+        for recipient_id in recipients:
+            create_notification(
+                db=db,
+                user_id=recipient_id,
+                actor_id=current_user.id,
+                project_id=project_id,
+                task_id=task.id,
+                notification_type="TASK_STATUS_CHANGED",
+                message=(
+                    f'The status of "{task.title}" changed '
+                    f"to {task.status.value}."
+                ),
+            )
+
+    # Notify relevant task participants about priority changes.
+    if "priority" in changed_fields:
+        recipients = {
+            task.creator_id,
+            task.assignee_id,
+        }
+
+        recipients.discard(None)
+        recipients.discard(current_user.id)
+
+        for recipient_id in recipients:
+            create_notification(
+                db=db,
+                user_id=recipient_id,
+                actor_id=current_user.id,
+                project_id=project_id,
+                task_id=task.id,
+                notification_type="TASK_PRIORITY_CHANGED",
+                message=(
+                    f'The priority of "{task.title}" changed '
+                    f"to {task.priority.value}."
+                ),
+            )
 
     db.commit()
     db.refresh(task)

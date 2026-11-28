@@ -379,3 +379,315 @@ def test_assigning_task_to_self_does_not_generate_notification(
     ).count()
 
     assert notification_count == 0
+
+
+def test_status_change_creates_activity_and_notifications(
+    client,
+    db_session,
+):
+    owner_token = register_and_login(
+        client, "statusowner@example.com"
+    )
+    member_token = register_and_login(
+        client, "statusmember@example.com"
+    )
+
+    project_id = create_project(client, owner_token)
+
+    owner_id = client.get(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+
+    member_id = client.get(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {member_token}"},
+    ).json()["id"]
+
+    db_session.add(
+        ProjectMember(
+            project_id=project_id,
+            user_id=member_id,
+            role=ProjectRole.MEMBER,
+        )
+    )
+    db_session.commit()
+
+    task = client.post(
+        f"/api/v1/projects/{project_id}/tasks/",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "title": "Status test task",
+            "assignee_id": member_id,
+        },
+    ).json()
+
+    response = client.patch(
+        f"/api/v1/projects/{project_id}/tasks/{task['id']}",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={"status": "IN_PROGRESS"},
+    )
+
+    assert response.status_code == 200
+
+    activity = db_session.query(ActivityLog).filter(
+        ActivityLog.task_id == task["id"],
+        ActivityLog.action == "TASK_STATUS_CHANGED",
+    ).first()
+
+    assert activity is not None
+    assert activity.details["old_status"] == "TODO"
+    assert activity.details["new_status"] == "IN_PROGRESS"
+
+    notifications = db_session.query(Notification).filter(
+        Notification.task_id == task["id"],
+        Notification.notification_type == "TASK_STATUS_CHANGED",
+    ).all()
+
+    assert len(notifications) == 1
+    assert notifications[0].user_id == member_id
+    assert notifications[0].actor_id == owner_id
+
+
+def test_priority_change_creates_activity_and_notification(
+    client,
+    db_session,
+):
+    owner_token = register_and_login(
+        client, "priorityowner@example.com"
+    )
+    member_token = register_and_login(
+        client, "prioritymember@example.com"
+    )
+
+    project_id = create_project(client, owner_token)
+
+    owner_id = client.get(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+
+    member_id = client.get(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {member_token}"},
+    ).json()["id"]
+
+    db_session.add(
+        ProjectMember(
+            project_id=project_id,
+            user_id=member_id,
+            role=ProjectRole.MEMBER,
+        )
+    )
+    db_session.commit()
+
+    task = client.post(
+        f"/api/v1/projects/{project_id}/tasks/",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "title": "Priority test task",
+            "assignee_id": member_id,
+        },
+    ).json()
+
+    response = client.patch(
+        f"/api/v1/projects/{project_id}/tasks/{task['id']}",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={"priority": "URGENT"},
+    )
+
+    assert response.status_code == 200
+
+    activity = db_session.query(ActivityLog).filter(
+        ActivityLog.task_id == task["id"],
+        ActivityLog.action == "TASK_PRIORITY_CHANGED",
+    ).first()
+
+    assert activity is not None
+    assert activity.details["old_priority"] == "MEDIUM"
+    assert activity.details["new_priority"] == "URGENT"
+
+    notification = db_session.query(Notification).filter(
+        Notification.task_id == task["id"],
+        Notification.notification_type == "TASK_PRIORITY_CHANGED",
+    ).first()
+
+    assert notification is not None
+    assert notification.user_id == member_id
+    assert notification.actor_id == owner_id
+
+
+def test_reassignment_creates_activity_and_notifies_new_assignee(
+    client,
+    db_session,
+):
+    owner_token = register_and_login(
+        client, "reassignowner@example.com"
+    )
+    old_member_token = register_and_login(
+        client, "reassignold@example.com"
+    )
+    new_member_token = register_and_login(
+        client, "reassignnew@example.com"
+    )
+
+    project_id = create_project(client, owner_token)
+
+    old_member_id = client.get(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {old_member_token}"},
+    ).json()["id"]
+
+    new_member_id = client.get(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {new_member_token}"},
+    ).json()["id"]
+
+    for member_id in [old_member_id, new_member_id]:
+        db_session.add(
+            ProjectMember(
+                project_id=project_id,
+                user_id=member_id,
+                role=ProjectRole.MEMBER,
+            )
+        )
+    db_session.commit()
+
+    task = client.post(
+        f"/api/v1/projects/{project_id}/tasks/",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "title": "Reassignment test",
+            "assignee_id": old_member_id,
+        },
+    ).json()
+
+    response = client.patch(
+        f"/api/v1/projects/{project_id}/tasks/{task['id']}",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={"assignee_id": new_member_id},
+    )
+
+    assert response.status_code == 200
+
+    activity = db_session.query(ActivityLog).filter(
+        ActivityLog.task_id == task["id"],
+        ActivityLog.action == "TASK_ASSIGNED",
+    ).first()
+
+    assert activity is not None
+    assert activity.details["old_assignee_id"] == old_member_id
+    assert activity.details["new_assignee_id"] == new_member_id
+
+    notification = db_session.query(Notification).filter(
+        Notification.task_id == task["id"],
+        Notification.user_id == new_member_id,
+        Notification.notification_type == "TASK_ASSIGNED",
+    ).first()
+
+    assert notification is not None
+
+
+def test_title_change_creates_activity_without_notification(
+    client,
+    db_session,
+):
+    token = register_and_login(
+        client, "titlechange@example.com"
+    )
+    project_id = create_project(client, token)
+    task = create_task(client, token, project_id)
+
+    response = client.patch(
+        f"/api/v1/projects/{project_id}/tasks/{task['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"title": "Updated task title"},
+    )
+
+    assert response.status_code == 200
+
+    activity = db_session.query(ActivityLog).filter(
+        ActivityLog.task_id == task["id"],
+        ActivityLog.action == "TASK_UPDATED",
+    ).first()
+
+    assert activity is not None
+    assert "title" in activity.details["changed_fields"]
+
+    notification_count = db_session.query(Notification).filter(
+        Notification.task_id == task["id"],
+    ).count()
+
+    assert notification_count == 0
+
+
+def test_unchanged_status_creates_no_new_activity_or_notification(
+    client,
+    db_session,
+):
+    token = register_and_login(
+        client, "unchangedstatus@example.com"
+    )
+    project_id = create_project(client, token)
+    task = create_task(client, token, project_id)
+
+    response = client.patch(
+        f"/api/v1/projects/{project_id}/tasks/{task['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "TODO"},
+    )
+
+    assert response.status_code == 200
+
+    activity_count = db_session.query(ActivityLog).filter(
+        ActivityLog.task_id == task["id"],
+        ActivityLog.action == "TASK_STATUS_CHANGED",
+    ).count()
+
+    notification_count = db_session.query(Notification).filter(
+        Notification.task_id == task["id"],
+    ).count()
+
+    assert activity_count == 0
+    assert notification_count == 0
+
+
+def test_reopening_completed_task_records_status_change(
+    client,
+    db_session,
+):
+    token = register_and_login(
+        client, "reopenactivity@example.com"
+    )
+    project_id = create_project(client, token)
+    task = create_task(client, token, project_id)
+
+    headers = {"Authorization": f"Bearer {token}"}
+    task_url = (
+        f"/api/v1/projects/{project_id}/tasks/{task['id']}"
+    )
+
+    client.patch(
+        task_url,
+        headers=headers,
+        json={"status": "DONE"},
+    )
+
+    response = client.patch(
+        task_url,
+        headers=headers,
+        json={"status": "IN_PROGRESS"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["completed_at"] is None
+
+    activities = db_session.query(ActivityLog).filter(
+        ActivityLog.task_id == task["id"],
+        ActivityLog.action == "TASK_STATUS_CHANGED",
+    ).order_by(ActivityLog.id).all()
+
+    assert len(activities) == 2
+    assert activities[0].details["new_status"] == "DONE"
+    assert activities[1].details["old_status"] == "DONE"
+    assert activities[1].details["new_status"] == "IN_PROGRESS"
